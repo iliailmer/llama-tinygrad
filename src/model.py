@@ -7,9 +7,13 @@ CONST_LLAMA_LAYERS = 16
 
 class MLP:
     def __init__(self):
-        self.up_proj = None
-        self.down_proj = None
-        self.gate_proj = None
+        self.up_proj = nn.Linear(2048, 8192)  # w1
+        self.down_proj = nn.Linear(8192, 2048)  # w2
+        self.gate_proj = nn.Linear(8192, 2048)  # w3
+
+    def forward(self, x: T) -> T:
+        x = self.down_proj(self.up_proj(x).silu() * self.gate_proj(x))
+        return x
 
 
 class SelfAttn:
@@ -20,6 +24,9 @@ class SelfAttn:
         self.o_proj = None
         self.q_proj = None
         self.v_proj = None
+
+    def forward(self, x: T) -> T:
+        return x
 
 
 class LlamaLayer:
