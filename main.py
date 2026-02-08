@@ -9,9 +9,7 @@ def main():
     weights = safe_load("./llama3.2/model.safetensors")
     pprint(Llama3(1, 1).__repr__())
     for k in weights.keys():
-        if "norm" in k:
-            pprint((k, weights[k]))
-            break
+        pprint((k, weights[k]))
 
 
 if __name__ == "__main__":

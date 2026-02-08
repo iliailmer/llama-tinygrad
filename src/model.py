@@ -16,14 +16,20 @@ class MLP:
         return x
 
 
-class SelfAttn:
+class GQAttn:
     """GQA"""
 
-    def __init__(self):
-        self.k_proj = None
+    def __init__(self, kv_heads: int, dim: int):
+        """
+        dim: int, size of token embedding
+        """
+        self.kv_heads = kv_heads
+        self.head_dim = dim // kv_heads
+
+        self.q_proj = nn.Linear(dim, dim)  # self.head_dim * kv_heads)
+        self.k_proj = nn.Linear(dim, self.head_dim * kv_heads)
+        self.v_proj = nn.Linear()
         self.o_proj = None
-        self.q_proj = None
-        self.v_proj = None
 
     def forward(self, x: T) -> T:
         return x
@@ -34,7 +40,7 @@ class LlamaLayer:
         self.input_layernorm = nn.LayerNorm(input_shape)
         self.mlp = MLP()
         self.post_attention_layernorm = nn.LayerNorm(output_shape)
-        self.self_attn = SelfAttn()
+        self.self_attn = GQAttn()
 
 
 class Llama3:
