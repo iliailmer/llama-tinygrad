@@ -1,4 +1,12 @@
+import json
+from pathlib import Path
+
 from tinygrad.tensor import Tensor
+
+
+def read_json(path: Path):
+    with open(path) as f:
+        return json.load(f)
 
 
 def print_keys(weight_dict: dict[str, Tensor]) -> dict:
