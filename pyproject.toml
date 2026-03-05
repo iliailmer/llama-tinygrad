@@ -8,5 +8,6 @@ dependencies = [
     "loguru>=0.7.3",
     "numpy>=2.4.2",
     "pydantic>=2.12.5",
+    "tiktoken>=0.9.0",
     "tinygrad>=0.11.0",
 ]
