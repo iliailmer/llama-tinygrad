@@ -1,6 +1,5 @@
 from tinygrad import Tensor as T
 from tinygrad import nn
-from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 
 from src.configs import LlamaConfig
@@ -11,8 +10,10 @@ def repeat_kv(x: T, n: int) -> T:
     batch_size, seq_len, n_kv_heads, head_dim = x.shape
     if n == 1:
         return x
-    return x.repeat((1, 1, 1, n)).reshape(  # NOTE: different from how tg did it
-        (batch_size, seq_len, n_kv_heads * n, head_dim)
+    return (
+        x.reshape(batch_size, seq_len, n_kv_heads, 1, head_dim)
+        .expand(batch_size, seq_len, n_kv_heads, n, head_dim)
+        .reshape(batch_size, seq_len, n_kv_heads * n, head_dim)
     )
 
 
@@ -70,16 +71,6 @@ class GQAttn:
 
         self.max_batch_size = max_batch_size
         self.max_seq_len = max_seq_len
-        self.cache_k = (
-            T.zeros((max_batch_size, max_seq_len, self.n_local_kv_heads, self.head_dim))
-            .requires_grad_(False)
-            .realize()
-        )
-        self.cache_v = (
-            T.zeros((max_batch_size, max_seq_len, self.n_local_kv_heads, self.head_dim))
-            .requires_grad_(False)
-            .realize()
-        )
 
     def __call__(self, x: T, start_pos: int, freqs_cis: T, mask: T | None = None) -> T:
         batch_size, seq_len, _ = x.shape
@@ -91,7 +82,7 @@ class GQAttn:
 
         xq, xk = apply_rope(xq, xk, freqs_cis)
 
-        if not hasattr(self, "kv_cache"):
+        if not hasattr(self, "cache_kv"):
             self.cache_kv = (
                 T.zeros(
                     2,
@@ -105,7 +96,7 @@ class GQAttn:
                 .realize()
             )
         self.cache_kv[:, :, start_pos : start_pos + seq_len, :, :].assign(
-            T.stack(xk, xv)
+            T.stack([xk, xv])
         ).realize()
 
         keys = self.cache_kv[0, :, 0 : start_pos + seq_len, :, :]
@@ -155,12 +146,12 @@ class Llama3:
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         if config.tie_word_embeddings:
             self.output.weight = self.embed_tokens.weight
-        rope = config.rope_scaling
         self.freqs_cis = (
             precompute_freqs_cis(
                 config.head_dim,
                 max_seq_len,
                 config.rope_theta,
+                rope_scaling=config.rope_scaling,
             )
             .contiguous()
             .requires_grad_(False)
