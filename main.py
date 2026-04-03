@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from loguru import logger
 from tinygrad import dtypes
 from tinygrad.helpers import tqdm
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load, safe_save
@@ -43,7 +44,11 @@ class Llama3Wrapper:
 
 
 def sample_top_p(
-    logits: Tensor, temp: float, top_p: float, history: list[int], repetition_penalty: float
+    logits: Tensor,
+    temp: float,
+    top_p: float,
+    history: list[int],
+    repetition_penalty: float,
 ) -> int:
     adjusted = logits.float().numpy().copy()
     if repetition_penalty > 1.0 and history:
@@ -101,6 +106,7 @@ def main():
     tokens = Tensor([token_ids])
 
     seq_len = tokens.shape[1]
+    logger.info("Sequence Length {}", seq_len)
     logits = model(tokens, 0)
     temp = 0.6
     top_p = 0.9
@@ -113,7 +119,7 @@ def main():
         history=token_ids,
         repetition_penalty=repetition_penalty,
     )
-    max_tokens_gen = 10
+    max_tokens_gen = 256
     generated = [next_token_id]
     print(generated)
     for i in tqdm(range(1, max_tokens_gen)):

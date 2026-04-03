@@ -1,3 +1,4 @@
+from loguru import logger
 from tinygrad import Tensor as T
 from tinygrad import nn
 from tinygrad.nn.state import get_state_dict
@@ -157,13 +158,12 @@ class Llama3:
             .requires_grad_(False)
         )
         self.max_seq_len = max_seq_len
-        self.forward_jit = self.forward
 
     def __repr__(self):
         return get_state_dict(self)
 
     def __call__(self, tokens: T, start_pos: int) -> T:
-        return self.forward_jit(tokens, start_pos)
+        return self.forward(tokens, start_pos)
 
     def forward(self, tokens: T, start_pos: int) -> T:
         batch_size, seq_len = tokens.shape
@@ -176,7 +176,7 @@ class Llama3:
         if seq_len > 1 and self.max_seq_len != 0:
             mask = (
                 T.full(
-                    (1, 1, seq_len, start_pos + seq_len),
+                    (1, 1, seq_len, seq_len),
                     float("-inf"),
                     dtype=x.dtype,
                     device=x.device,
@@ -184,6 +184,7 @@ class Llama3:
                 .triu(start_pos + 1)
                 .contiguous()
             )
+            logger.info("MASK")
 
         for layer in self.layers:
             x = layer(x, start_pos, freqs_cis, mask)
