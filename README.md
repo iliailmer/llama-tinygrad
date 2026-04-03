@@ -1,5 +1,7 @@
 # A Small Llama 3.2 1B inference engine
 
+Built with Llama
+
 ## Example
 
 ```

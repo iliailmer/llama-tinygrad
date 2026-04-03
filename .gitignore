@@ -183,3 +183,6 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# Model weights
+llama3.2/
+
