@@ -6,7 +6,7 @@ import numpy as np
 from loguru import logger
 from tinygrad import dtypes
 from tinygrad.helpers import tqdm
-from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load, safe_save
+from tinygrad.nn.state import load_state_dict, safe_load
 from tinygrad.tensor import Tensor
 
 from src.configs import load_config
