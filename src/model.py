@@ -2,6 +2,7 @@ from loguru import logger
 from tinygrad import Tensor as T
 from tinygrad import nn
 from tinygrad.nn.state import get_state_dict
+from tinygrad.tensor import Tensor
 
 from src.configs import LlamaConfig
 from src.rope import apply_rope, precompute_freqs_cis
@@ -147,15 +148,14 @@ class Llama3:
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         if config.tie_word_embeddings:
             self.output.weight = self.embed_tokens.weight
-        self.freqs_cis = (
+        self.freqs_cis: Tensor = (
             precompute_freqs_cis(
                 config.head_dim,
                 max_seq_len,
                 config.rope_theta,
                 rope_scaling=config.rope_scaling,
-            )
-            .contiguous()
-            .requires_grad_(False)
+            ).contiguous()
+            # .requires_grad_(False)
         )
         self.max_seq_len = max_seq_len
 

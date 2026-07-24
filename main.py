@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 from loguru import logger
-from tinygrad import dtypes
+from tinygrad import Device, dtypes
 from tinygrad.helpers import tqdm
 from tinygrad.nn.state import load_state_dict, safe_load
 from tinygrad.tensor import Tensor
@@ -16,7 +16,9 @@ from src.tokenizer import Tokenizer
 
 def fix_bf16(weights: dict[Any, Tensor]) -> dict[Any, Tensor]:
     return {
-        k: v.cast(dtypes.float32) if v.dtype == dtypes.bfloat16 else v
+        k: v.to(Device.DEFAULT).cast(dtypes.float32)
+        if v.dtype == dtypes.bfloat16
+        else v
         for k, v in weights.items()
     }
 
@@ -78,6 +80,7 @@ def main():
     config_path = Path("./llama3.2/config.json")
     config = load_config(config_path)
     weights = safe_load("./llama3.2/model.safetensors")
+    weights = fix_bf16(weights)
 
     # HuggingFace stores Q and K weights in a "half-half" RoPE interleaving,
     # but this model applies RoPE with consecutive pairs. Permute to match.
@@ -102,15 +105,15 @@ def main():
     tokenizer = Tokenizer(Path("./llama3.2/"))
 
     # sample sentence
-    token_ids = tokenizer.encode("The capital of the USA is ")
+    token_ids = tokenizer.encode("The capital of the USA is")
     tokens = Tensor([token_ids])
 
     seq_len = tokens.shape[1]
     logger.info("Sequence Length {}", seq_len)
     logits = model(tokens, 0)
-    temp = 0.6
+    temp = 0.8
     top_p = 0.9
-    repetition_penalty = 1.1
+    repetition_penalty = 1.3
 
     next_token_id = sample_top_p(
         logits[:, -1, :].flatten(),
@@ -121,7 +124,6 @@ def main():
     )
     max_tokens_gen = 256
     generated = [next_token_id]
-    print(generated)
     for i in tqdm(range(1, max_tokens_gen)):
         start_pos = seq_len - 1 + i
         logits = model(Tensor([[generated[-1]]]), start_pos)
