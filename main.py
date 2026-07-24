@@ -1,148 +1,68 @@
+import argparse
 import random
 from pathlib import Path
-from typing import Any
 
 import numpy as np
-from loguru import logger
-from tinygrad import Device, Variable, dtypes
-from tinygrad.helpers import tqdm
-from tinygrad.nn.state import load_state_dict, safe_load
 from tinygrad.tensor import Tensor
 
-from src.configs import load_config
-from src.model import Llama3
+from src.generate import generate, load_model
 from src.tokenizer import Tokenizer
 
 
-def fix_bf16(weights: dict[Any, Tensor]) -> dict[Any, Tensor]:
-    return {
-        k: v.to(Device.DEFAULT).cast(dtypes.float32)
-        if v.dtype == dtypes.bfloat16
-        else v
-        for k, v in weights.items()
-    }
-
-
-def set_seed(seed_value):
-    # Set seed for standard python random module
+def set_seed(seed_value: int) -> None:
     random.seed(seed_value)
-
-    # Set seed for numpy
     np.random.seed(seed_value)
-
-    # Set seed for tinygrad
     Tensor.manual_seed(seed_value)
 
 
-set_seed(42)
-
-
-class Llama3Wrapper:
-    def __init__(self, model: Llama3):
-        self.model = model
-
-    def __call__(self, *args, **kwargs) -> Tensor:
-        return self.model(*args, **kwargs)
-
-
-def sample_top_p(
-    logits: Tensor,
-    temp: float,
-    top_p: float,
-    history: list[int],
-    repetition_penalty: float,
-) -> int:
-    adjusted = logits.float().numpy().copy()
-    if repetition_penalty > 1.0 and history:
-        for token_id in set(history):
-            if adjusted[token_id] > 0:
-                adjusted[token_id] /= repetition_penalty
-            else:
-                adjusted[token_id] *= repetition_penalty
-
-    adjusted = adjusted / temp
-    adjusted = adjusted - np.max(adjusted)
-    probs = np.exp(adjusted)
-    probs = probs / probs.sum()
-
-    sorted_idx = np.argsort(-probs)
-    sorted_probs = probs[sorted_idx]
-    cdf = np.cumsum(sorted_probs)
-
-    cutoff = np.searchsorted(cdf, top_p, side="left") + 1
-    kept_idx = sorted_idx[:cutoff]
-    kept_probs = probs[kept_idx]
-    kept_probs = kept_probs / kept_probs.sum()
-    return int(np.random.choice(kept_idx, p=kept_probs))
-
-
-def main():
-    config_path = Path("./llama3.2/config.json")
-    config = load_config(config_path)
-    weights = safe_load("./llama3.2/model.safetensors")
-    weights = fix_bf16(weights)
-
-    # HuggingFace stores Q and K weights in a "half-half" RoPE interleaving,
-    # but this model applies RoPE with consecutive pairs. Permute to match.
-    def permute(v: Tensor, n_heads: int) -> Tensor:
-        return (
-            v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1])
-            .transpose(1, 2)
-            .reshape(*v.shape[:2])
-        )
-
-    for lid in range(config.num_hidden_layers):
-        q_key = f"model.layers.{lid}.self_attn.q_proj.weight"
-        k_key = f"model.layers.{lid}.self_attn.k_proj.weight"
-        weights[q_key] = permute(weights[q_key], config.num_attention_heads)
-        weights[k_key] = permute(weights[k_key], config.num_key_value_heads)
-
-    # model init
-    model = Llama3Wrapper(Llama3(config))
-    load_state_dict(model, weights, strict=False)
-
-    # tiktoken
-    tokenizer = Tokenizer(Path("./llama3.2/"))
-
-    # sample sentence
-    token_ids = tokenizer.encode("The capital of the USA is")
-    tokens = Tensor([token_ids])
-
-    seq_len = tokens.shape[1]
-    logger.info("Sequence Length {}", seq_len)
-    logits = model(tokens, 0)
-    temp = 0.8
-    top_p = 0.9
-    repetition_penalty = 1.3
-
-    next_token_id = sample_top_p(
-        logits[:, -1, :].flatten(),
-        temp=temp,
-        top_p=top_p,
-        history=token_ids,
-        repetition_penalty=repetition_penalty,
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run Llama 3.2 inference with tinygrad.")
+    parser.add_argument(
+        "prompt",
+        nargs="?",
+        default="The capital of the USA is",
+        help="Prompt to complete (default: %(default)r).",
     )
-    max_tokens_gen = 256
-    max_context = model.model.max_seq_len
-    generated = [next_token_id]
-    for i in tqdm(range(1, max_tokens_gen)):
-        start_pos = seq_len - 1 + i
-        logits = model.model.decode_step(
-            Tensor([[generated[-1]]]),
-            Variable("start_pos", 1, max_context).bind(start_pos),
-        )
-        next_token_id = sample_top_p(
-            logits[:, -1, :].flatten(),
-            temp=temp,
-            top_p=top_p,
-            history=token_ids + generated,
-            repetition_penalty=repetition_penalty,
-        )
-        generated.append(next_token_id)
-        if generated[-1] in (tokenizer.eos_id, tokenizer.eot_id):
-            break
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=Path("./llama3.2"),
+        help="Directory containing config.json, model.safetensors, and the tokenizer files.",
+    )
+    parser.add_argument("--max-tokens", type=int, default=256, help="Max tokens to generate.")
+    parser.add_argument("--temp", type=float, default=0.8, help="Sampling temperature.")
+    parser.add_argument("--top-p", type=float, default=0.9, help="Nucleus sampling threshold.")
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.3,
+        help="Penalty applied to already-generated tokens (1.0 disables it).",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+    parser.add_argument(
+        "--no-progress", action="store_true", help="Disable the token-generation progress bar."
+    )
+    return parser.parse_args()
 
-    print(tokenizer.decode(token_ids + generated))
+
+def main() -> None:
+    args = parse_args()
+    set_seed(args.seed)
+
+    model, _ = load_model(args.model_dir, verbose=not args.no_progress)
+    tokenizer = Tokenizer(args.model_dir)
+
+    text = generate(
+        model,
+        tokenizer,
+        args.prompt,
+        max_tokens=args.max_tokens,
+        temp=args.temp,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+        show_progress=not args.no_progress,
+    )
+    print(text)
 
 
 if __name__ == "__main__":

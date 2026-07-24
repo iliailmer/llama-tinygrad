@@ -75,6 +75,7 @@ class Tokenizer:
         self.bos_id = special_tokens["<|begin_of_text|>"]
         self.eos_id = special_tokens["<|end_of_text|>"]
         self.eot_id = special_tokens.get("<|eot_id|>", self.eos_id)
+        self.special_ids = set(special_tokens.values())
 
     def encode(self, text: str, bos: bool = True) -> list[int]:
         tokens = self.enc.encode(text, allowed_special="all")
@@ -82,5 +83,7 @@ class Tokenizer:
             tokens = [self.bos_id] + tokens
         return tokens
 
-    def decode(self, tokens: list[int]) -> str:
+    def decode(self, tokens: list[int], skip_special: bool = False) -> str:
+        if skip_special:
+            tokens = [t for t in tokens if t not in self.special_ids]
         return self.enc.decode(tokens)
