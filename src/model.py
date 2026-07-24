@@ -1,8 +1,10 @@
 from loguru import logger
 from tinygrad import Tensor as T
 from tinygrad import nn
+from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import sint
 
 from src.configs import LlamaConfig
 from src.rope import apply_rope, precompute_freqs_cis
@@ -74,7 +76,7 @@ class GQAttn:
         self.max_batch_size = max_batch_size
         self.max_seq_len = max_seq_len
 
-    def __call__(self, x: T, start_pos: int, freqs_cis: T, mask: T | None = None) -> T:
+    def __call__(self, x: T, start_pos: sint, freqs_cis: T, mask: T | None = None) -> T:
         batch_size, seq_len, _ = x.shape
         xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
 
@@ -131,7 +133,7 @@ class LlamaTransformer:
         )
         self.self_attn = GQAttn(config, max_seq_len=max_seq_len)
 
-    def __call__(self, x: T, start_pos: int, freqs_cis: T, mask: T | None) -> T:
+    def __call__(self, x: T, start_pos: sint, freqs_cis: T, mask: T | None) -> T:
         h = x + self.self_attn(self.input_layernorm(x), start_pos, freqs_cis, mask)
         out = h + self.mlp(self.post_attention_layernorm(h))
         return out
@@ -162,10 +164,21 @@ class Llama3:
     def __repr__(self):
         return get_state_dict(self)
 
-    def __call__(self, tokens: T, start_pos: int) -> T:
+    def __call__(self, tokens: T, start_pos: sint) -> T:
         return self.forward(tokens, start_pos)
 
-    def forward(self, tokens: T, start_pos: int) -> T:
+    @TinyJit
+    def decode_step(self, tokens: T, start_pos: sint) -> T:
+        """JIT-compiled single-token decode step.
+
+        `start_pos` must be a bound `Variable` (not a plain int) so the
+        growing KV-cache slice keeps a symbolic shape across calls -
+        otherwise every call has a distinct concrete shape and tinygrad
+        recompiles kernels from scratch on every generated token.
+        """
+        return self.forward(tokens, start_pos).realize()
+
+    def forward(self, tokens: T, start_pos: sint) -> T:
         batch_size, seq_len = tokens.shape
         x = self.embed_tokens(tokens).contiguous()
         freqs_cis = self.freqs_cis.cast(x.dtype)[

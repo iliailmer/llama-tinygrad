@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 from loguru import logger
-from tinygrad import Device, dtypes
+from tinygrad import Device, Variable, dtypes
 from tinygrad.helpers import tqdm
 from tinygrad.nn.state import load_state_dict, safe_load
 from tinygrad.tensor import Tensor
@@ -123,10 +123,14 @@ def main():
         repetition_penalty=repetition_penalty,
     )
     max_tokens_gen = 256
+    max_context = model.model.max_seq_len
     generated = [next_token_id]
     for i in tqdm(range(1, max_tokens_gen)):
         start_pos = seq_len - 1 + i
-        logits = model(Tensor([[generated[-1]]]), start_pos)
+        logits = model.model.decode_step(
+            Tensor([[generated[-1]]]),
+            Variable("start_pos", 1, max_context).bind(start_pos),
+        )
         next_token_id = sample_top_p(
             logits[:, -1, :].flatten(),
             temp=temp,
