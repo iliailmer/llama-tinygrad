@@ -157,7 +157,6 @@ class Llama3:
                 config.rope_theta,
                 rope_scaling=config.rope_scaling,
             ).contiguous()
-            # .requires_grad_(False)
         )
         self.max_seq_len = max_seq_len
 
@@ -179,7 +178,7 @@ class Llama3:
         return self.forward(tokens, start_pos).realize()
 
     def forward(self, tokens: T, start_pos: sint) -> T:
-        batch_size, seq_len = tokens.shape
+        _, seq_len = tokens.shape
         x = self.embed_tokens(tokens).contiguous()
         freqs_cis = self.freqs_cis.cast(x.dtype)[
             :, start_pos : start_pos + seq_len, :, :, :
@@ -197,7 +196,7 @@ class Llama3:
                 .triu(start_pos + 1)
                 .contiguous()
             )
-            logger.info("MASK")
+            logger.debug("Prefill: applying causal mask for {} tokens", seq_len)
 
         for layer in self.layers:
             x = layer(x, start_pos, freqs_cis, mask)
